@@ -118,3 +118,11 @@ Here is a list of third-party projects connected to this repository:
 ---
 
 (C) 2007-2021 - ntop.org and contributors
+
+### Многопроцессный фаззинг
+
+Запуск главного процесса (master), который координирует работу:
+![Master Node](docs/master_fuzz.png)
+
+Запуск вторичного процесса (worker1), который параллельно выполняет мутации:
+![Worker Node](docs/worker_fuzz.png)
