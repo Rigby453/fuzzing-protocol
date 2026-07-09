@@ -1,128 +1,243 @@
-[![Build Status](https://travis-ci.org/ntop/n2n.png?branch=dev)](https://travis-ci.org/ntop/n2n)
+# Fuzzing the n2n Protocol with AFLNet
+
+В этом репозитории собраны материалы, полученные в ходе выполнения работы по фаззингу сетевого протокола **n2n** с использованием **AFLNet**.
 
 
-# n2n
 
-n2n is a light VPN software which makes it easy to create virtual networks bypassing intermediate firewalls.
+# Выбор проекта
 
-In order to start using n2n, two elements are required:
+В качестве объекта исследования был выбран проект **n2n**. Проект представляет собой реализацию peer-to-peer VPN, в которой взаимодействие между клиентами и супернодой осуществляется по собственному сетевому протоколу.
 
-- A _supernode_: it allows edge nodes to announce and discover other nodes. It must have a port publicly accessible on internet.
-- _edge_ nodes: the nodes which will be a part of the virtual networks
+Выбор именно этого проекта был сделан, так как исходный код полностью написан на языке C, работа суперноды построена вокруг последовательного обмена сообщениями между участниками сети, поэтому логика обработки входящих пакетов зависит от текущего состояния соединения, а не только от содержимого одного сообщения. Это делает протокол подходящим кандидатом для stateful-фаззинга.
 
-A virtual network shared between multiple edge nodes in n2n is called a _community_. A single supernode can relay multiple communities and a single computer can be part of multiple communities at the same time. An encryption key can be used by the edge nodes to encrypt the packets within their community.
-
-n2n tries to establish a direct peer-to-peer connection via udp between the edge nodes when possible. When this is not possible (usually due to special NAT devices), the supernode is also used to relay the packets.
+ Не удалось найти готовых примеров использования AFLNet или StateAFL.
 
 
-## Quick Setup
+# Выбор фаззера
 
-Some Linux distributions already provide n2n as a package so a simple `sudo apt install n2n` will do the work. Alternatively, up-to-date packages for most distributions are available on [ntop repositories](http://packages.ntop.org/).
+Для выполнения работы был выбран AFLNet.
 
-On host1 run:
+Обычный AFL предназначен для программ, которые получают входные данные из файлов, поэтому напрямую использовать его для тестирования сетевого сервера невозможно. AFLNet развивает идеи AFL и предназначен специально для фаззинга сетевых приложений. Вместо файлов он передает мутированные данные по сети.
 
-```sh
-$ sudo edge -c mynetwork -k mysecretpass -a 192.168.100.1 -f -l supernode.ntop.org:7777
+
+
+# Подготовка проекта
+
+Перед запуском фаззинга исходный код n2n пришлось немного изменить. Некоторые особенности поведения суперноды мешали корректной работе AFLNet, который многократно запускает исследуемое приложение, отслеживает покрытие кода и после каждого запуска вновь возвращает программу в исходное состояние.
+
+Все изменения оформлены в виде отдельных патчей и находятся в каталоге `patches`.
+
+## determinism.patch
+
+Одним из требований greybox-фаззинга является воспроизводимость выполнения программы. Если один и тот же пакет несколько раз отправить серверу, программа должна проходить один и тот же путь выполнения. Только в этом случае AFLNet может определить, что изменение покрытия произошло именно из-за очередной мутации входных данных.
+
+В исходной версии n2n использовалась случайная инициализация генератора псевдослучайных чисел и текущее системное время. Из-за этого одинаковые входные данные могли приводить к различному поведению программы.
+
+Патч фиксирует начальное значение генератора случайных чисел и добавляет заглушку для функции `gettimeofday`.
+
+
+
+## sigterm_handler.patch
+
+Во время фаззинга AFLNet постоянно запускает и завершает исследуемый процесс. В исходной версии суперноды завершение происходило не всегда корректно, что могло приводить к появлению зависших процессов.
+
+
+## gcov.patch
+
+После завершения фаззинга требовалось получить отчет о покрытии кода.
+
+Современные версии GCC используют функцию `__gcov_dump`, тогда как в старых версиях встречается вызов `__gcov_flush`. Патч заменяет устаревшую функцию на актуальную и выполняет ее только при сборке проекта с поддержкой покрытия через макрос `FUZZING_COVERAGE`.
+
+
+
+
+# Сборка проекта
+
+После применения всех патчей проект был собран с использованием компилятора `afl-clang-fast`.
+
+В отличие от обычного `clang`, данный компилятор автоматически добавляет в исполняемый файл специальные точки контроля, позволяющие AFLNet определять, какие участки программы были выполнены после обработки каждого входного пакета.
+
+Основная сборка выполнялась при помощи скрипта
+
+   bash
+./scripts/build_afl.sh
+
+
+Для быстрой подготовки рабочего окружения использовался скрипт
+
+   bash
+./scripts/quickstart.sh
+
+
+
+
+# Интеграция поддержки протокола в AFLNet
+
+Одной из особенностей AFLNet является возможность учитывать состояние исследуемого протокола. Для этого фаззер должен понимать структуру сетевых сообщений и уметь извлекать из них информацию, необходимую для построения последовательностей запросов.
+
+Для поддержки протокола n2n в исходный код AFLNet были добавлены пользовательские функции `extract_requests_n2n` и `extract_response_codes_n2n`. Первая отвечает за выделение отдельных запросов из входного потока данных, а вторая позволяет анализировать ответы исследуемого приложения и использовать их при исследовании различных состояний протокола.
+
+Во время интеграции возникла проблема, не связанная непосредственно с самим n2n. После успешной компиляции AFLNet завершался практически сразу после запуска, выводя сообщение:
+
+   text
+Corrupted head alloc canary
+
+
+Ошибка возникала внутри AFLNet.
+
+После анализа исходного кода фаззера выяснилось, что AFLNet не использует стандартные функции работы с памятью. Вместо `malloc()` и `free()` он применяет собственный аллокатор `ck_alloc()`.
+
+Все вызовы `malloc()`, относящиеся к реализованному парсеру протокола, были заменены на `ck_alloc()`.
+
+
+# Подготовка начального корпуса
+
+При фаззинге сетевых приложений использование полностью случайных пакетов оказывается малоэффективным. В большинстве случаев сервер отклоняет их еще на этапе проверки заголовков, поэтому исследуется лишь небольшая часть программы.
+
+Чтобы избежать этой проблемы, был сформирован небольшой корпус корректных UDP-пакетов протокола n2n.
+В стартовый корпус вошли:
+
+пакеты регистрации узла `REGISTER_SUPER`, запросы информации о соседних узлах ,служебные heartbeat-сообщения.
+
+Все файлы расположены в каталоге `seeds`.
+
+
+# Пользовательский словарь
+
+После подготовки стартового корпуса был создан пользовательский словарь AFLNet.
+
+При его составлении был изучен исходный код n2n, содержащий описание структур сообщений и типов пакетов. На основании этого анализа были выделены наиболее часто используемые константы протокола, которые были добавлены в словарь.
+
+Во время мутации AFLNet может использовать значения из словаря вместо полностью случайных байтов. Это позволяет значительно чаще формировать синтаксически корректные сообщения, успешно проходящие начальные проверки структуры пакета.
+
+Для оценки эффективности словаря был проведен сравнительный эксперимент.
+
+В первом случае фаззинг выполнялся только со стандартными мутациями AFLNet.
+
+![Фаззинг без словаря](docs/screenshots/fuzzing_without_dict.png)
+
+После этого аналогичный запуск был повторен с использованием пользовательского словаря.
+
+![Фаззинг со словарем](docs/screenshots/fuzzing_with_dict.png)
+
+Продолжительность запусков составляла около 30 минут и около 1 часа.
+
+Полученные результаты показывают, что использование словаря позволяет быстрее исследовать новые пути выполнения программы.
+
+
+
+# Многопроцессный фаззинг
+
+AFLNet поддерживает запуск нескольких экземпляров фаззера одновременно. Все процессы используют общую директорию результатов и автоматически обмениваются найденными интересными входными данными. Такой режим позволяет эффективнее использовать вычислительные ресурсы и ускоряет исследование пространства состояний.
+
+Главный экземпляр фаззера был запущен в режиме **master**.
+
+   bash
+./afl-fuzz \
+-i ~/Desktop/n2n/seeds \
+-o ~/Desktop/fuzzing_results/out_multi \
+-N udp://127.0.0.1/7654 \
+-P N2N \
+-K \
+-m none \
+-t 10000+ \
+-M master \
+-- ~/Desktop/n2n/build_afl/supernode -p 7654 -f
+
+
+Работа главного процесса показана ниже.
+
+![Master](docs/master_fuzz.png)
+
+Одновременно был запущен второй экземпляр AFLNet в режиме **worker**.
+
+   bash
+./afl-fuzz \
+-i ~/Desktop/n2n/seeds \
+-o ~/Desktop/fuzzing_results/out_multi \
+-N udp://127.0.0.1/7655 \
+-P N2N \
+-K \
+-m none \
+-t 10000+ \
+-S worker1 \
+-- ~/Desktop/n2n/build_afl/supernode -p 7655 -f
+
+
+Результат работы второго процесса приведен на следующем скриншоте.
+
+![Worker](docs/worker_fuzz.png)
+
+Во время работы процессы автоматически обменивались найденными тестовыми случаями.
+
+На экране `worker1` можно увидеть поле
+
+```text
+imported : 5
 ```
 
-On host2 run:
+Это означает, что процесс импортировал пять новых входных данных, найденных главным экземпляром AFLNet. После получения этих файлов фаззер продолжил их мутацию уже самостоятельно.
 
-```sh
-$ sudo edge -c mynetwork -k mysecretpass -a 192.168.100.2 -f -l supernode.ntop.org:7777
+
+
+# Построение отчета о покрытии
+
+Для этого использовалась стандартная возможность GCC — флаг `--coverage`, который автоматически добавляет в программу счетчики выполнения строк и переходов.
+
+После сборки инструментированная версия суперноды была запущена повторно, а через нее был пропущен весь корпус тестовых данных, накопленный AFLNet в процессе фаззинга. 
+
+На основе файлов gcov был сформирован отчет о покрытии.# Fuzzing the n2n Protocol with AFLNet
+
+В этом репозитории собраны материалы, полученные в ходе выполнения работы по фаззингу сетевого протокола **n2n** с использованием **AFLNet**.
+
+
+
+# Анализ найденных аварийных завершений
+
+Во время многопроцессного фаззинга AFLNet зарегистрировал **15 аварийных завершений** исследуемой программы.
+
+Первичный анализ показал, что найденные входные данные отличаются лишь отдельными мутациями и приводят к падению в одном и том же участке кода.
+
+Причиной завершения программы является получение сигнала ,который возникает при обращении процесса к недопустимой области памяти.
+
+Исследование входного пакета показало, что аварийное завершение вызывается сообщением типа `REGISTER_SUPER`.
+
+Во время одной из мутаций AFLNet изменяет **41-й байт** полезной нагрузки пакета. Несмотря на повреждение структуры сообщения, супернода продолжает обработку полученных данных без достаточной проверки их корректности.
+
+
+
+# Воспроизведение найденного крэша
+
+Для удобства повторного воспроизведения найденной ошибки все необходимые материалы сохранены в каталоге
+
+   text
+docs/crashes/
+   
+
+Файл `crash_000_sigsegv.bin` представляет собой бинарный дамп UDP-пакета, вызывающего аварийное завершение программы.
+
+В файле `README.md` приведен пример команды для повторной отправки сохраненного пакета с использованием вспомогательного скрипта.
+
+```bash
+python3 scripts/replay_seed.py \
+docs/crashes/crash_000_sigsegv.bin \
+127.0.0.1 \
+7654
 ```
 
-Now the two hosts can ping each other.
-
-**IMPORTANT** It is strongly advised to choose a custom community name (`-c`) and a secret encryption key (`-k`) in order to prevent other users from connecting to your computer. For the privacy of your data sent and to reduce the server load of `supernode.ntop.org`, it is also suggested to set up a custom supernode as explained below.
-
-
-## Setting up a Custom Supernode
-
-You can create your own infrastructure by setting up a supernode on a public server (e.g. a VPS). You just need to open a single port (1234 in the example below) on your firewall (usually `iptables`).
-
-1. Install the n2n package
-2. Edit `/etc/n2n/supernode.conf` and add the following:
-   ```
-   -p=1234
-   ```
-3. Start the supernode service with `sudo systemctl start supernode`
-4. Optionally enable supernode start on boot: `sudo systemctl enable supernode`
-
-Now the supernode service should be up and running on port 1234. On your edge nodes you can now specify `-l your_supernode_ip:1234` to use it. All the edge nodes must use the same supernode.
-
-
-## Manual Compilation
-
-On Linux, compilation from source is straight forward:
-
-```sh
-./autogen.sh
-./configure
-make
-
-# optionally install
-make install
-```
-
-Some parts of the code significantly benefit from compiler optimizations and platform features such as NEON, SSE and AVX. To enable, use `./configure CFLAGS="-O3 -march=native"` for configuration instead of `./configure`.
-
-For Windows, MacOS and general building options, please check out [Building documentation](doc/Building.md) for compilation and running.
-
-**IMPORTANT** It is generally recommended to use the [latest stable release](https://github.com/ntop/n2n/releases). Please note that the current _dev_ branch usually is not guaranteed to be backward compatible neither with the latest stable release nor with previous _dev_ states. On the other hand, if you dare to try bleeding edge features, you are encouraged to compile from _dev_ – just keep track of sometimes rapidly occuring changes. Feedback in the _Issues_ section is appreciated.
-
-
-## Security Considerations
-
-When payload encryption is enabled (provide a key using `-k`), the supernode will not be able to decrypt
-the traffic exchanged between two edge nodes but it will know that edge A is talking with edge B.
-
-The choice of encryption schemes that can be applied to payload has recently been enhanced. Please have
-a look at [Crypto description](doc/Crypto.md) for a quick comparison chart to help make a choice. n2n edge nodes use 
-AES encryption by default. Other ciphers can be chosen using the `-A_` option.
-
-A benchmark of the encryption methods is available when compiled from source with `tools/n2n-benchmark`.
-
-The header which contains some metadata like the virtual MAC address of the edge nodes, their IP address, their real 
-hostname and the community name optionally can be encrypted applying `-H` on the edges.
-
-
-## Advanced Configuration
-
-More information about communities, support for multiple supernodes, routing, traffic restrictions and on how to run an edge as 
-a service is available in the [more detailed documentation](doc/Advanced.md).
-
-
-## Contribution
-
-You can contribute to n2n in various ways:
-
-- Update an [open issue](https://github.com/ntop/n2n/issues) or create a new one with detailed information
-- Propose new features
-- Improve the documentation
-- Provide pull requests with enhancements
-
-For details about the internals of n2n check out the [Hacking guide](https://github.com/ntop/n2n/blob/dev/doc/Hacking.md).
-
-
-## Further Readings and Related Projects
-
-Answers to frequently asked questions can be found in our [FAQ document](https://github.com/ntop/n2n/blob/dev/doc/Faq.md).
-
-Here is a list of third-party projects connected to this repository:
-
-- Collection of pre-built binaries for Windows: [lucktu](https://github.com/lucktu/n2n)
-- n2n for Android: [hin2n](https://github.com/switch-iot/hin2n)
-- Docker images: [Docker Hub](https://hub.docker.com/r/supermock/supernode/)
-- Go bindings, management daemons and CLIs for n2n edges and supernodes, Docker, Kubernetes & Helm Charts: [pojntfx/gon2n](https://pojntfx.github.io/gon2n/)
+После запуска суперноды и отправки данного пакета воспроизводится найденное AFLNet аварийное завершение.
 
 ---
 
-(C) 2007-2021 - ntop.org and contributors
+# Полученные результаты
 
-### Многопроцессный фаззинг
+Каталог `coverage_html` содержит HTML-отчет LCOV.
 
-Запуск главного процесса (master), который координирует работу:
-![Master Node](docs/master_fuzz.png)
+Каталог `crashes` включает пакет, воспроизводящий найденную ошибку, и инструкцию по его повторному запуску.
 
-Запуск вторичного процесса (worker1), который параллельно выполняет мутации:
-![Worker Node](docs/worker_fuzz.png)
+В каталоге `screenshots` находятся результаты сравнительного тестирования пользовательского словаря.
+
+Файлы `master_fuzz.png` и `worker_fuzz.png` содержат скриншоты многопроцессного запуска AFLNet.
+
+
+
