@@ -115,7 +115,8 @@ cd mutator && make
 Мутатор понимает структуру заголовка n2n-пакета и при мутации не затрагивает поля version и msg_type, что позволяет суперноде принимать пакеты и проходить глубже по коду обработки. Подключается к AFLNet через флаг `-c`:
 
 ```bash
-afl-fuzz ... -c ./mutator/n2n_mutator.so -- ./build_afl/supernode -p 7654 -f```
+afl-fuzz ... -c ./mutator/n2n_mutator.so -- ./build_afl/supernode -p 7654 -f
+```
 
 
 # Пользовательский словарь
