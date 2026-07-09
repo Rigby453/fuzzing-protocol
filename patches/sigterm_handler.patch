@@ -1,0 +1,55 @@
+From: n2n-fuzzing <fuzzer@localhost>
+Date: Mon, 01 Jan 2025 00:00:00 +0000
+Subject: [PATCH 2/3] fuzzing: add clean SIGTERM handler for AFL restart
+
+AFLNet uses -K flag to send SIGTERM to restart the server between
+test cases. Without a clean shutdown handler, sockets may not be
+released, causing "Address already in use" on restart.
+
+This patch adds a SIGTERM handler that:
+  1. Closes all open sockets gracefully
+  2. Flushes gcov coverage data (important for --coverage builds)
+  3. Calls _exit(0) (not exit()) to avoid atexit() interference
+
+--- a/src/supernode.c
++++ b/src/supernode.c
+@@ -1,5 +1,6 @@
+ #include "n2n.h"
+ #include "sn_utils.h"
++#include <signal.h>
+ 
++#ifdef AFL_FUZZING
++static n2n_sn_t *g_sss_ptr = NULL;
++
++static void afl_sigterm_handler(int sig) {
++    (void)sig;
++    if (g_sss_ptr) {
++        /* Close all sockets to release ports immediately */
++        if (g_sss_ptr->sock >= 0) {
++            shutdown(g_sss_ptr->sock, SHUT_RDWR);
++            close(g_sss_ptr->sock);
++            g_sss_ptr->sock = -1;
++        }
++        if (g_sss_ptr->mgmt_sock >= 0) {
++            close(g_sss_ptr->mgmt_sock);
++            g_sss_ptr->mgmt_sock = -1;
++        }
++    }
++#ifdef __GNUC__
++    /* Flush gcov data before exit so coverage is recorded */
++    __gcov_flush();
++#endif
++    _exit(0);   /* _exit: skip atexit handlers, release fd fast */
++}
++#endif /* AFL_FUZZING */
++
+ int main(int argc, char *argv[]) {
+     n2n_sn_t sss;
+ 
++#ifdef AFL_FUZZING
++    g_sss_ptr = &sss;
++    signal(SIGTERM, afl_sigterm_handler);
++    signal(SIGINT,  afl_sigterm_handler);
++#endif
++
+     /* ... rest of main ... */

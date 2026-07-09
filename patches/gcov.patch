@@ -1,0 +1,35 @@
+From: n2n-fuzzing <fuzzer@localhost>
+Date: Mon, 01 Jan 2025 00:00:00 +0000
+Subject: [PATCH 3/3] fuzzing: add FUZZING_COVERAGE cmake option
+
+Adds a cmake option -DFUZZING_COVERAGE=ON that enables:
+  - gcov instrumentation (--coverage / -fprofile-arcs -ftest-coverage)
+  - -O0 optimization level (required for accurate line coverage)
+  - -g debug symbols
+  - links against gcov or uses --coverage linker flag
+
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -1,6 +1,20 @@
+ cmake_minimum_required(VERSION 3.12)
+ project(n2n C)
+ 
++# -------------------------------------------------------
++# Coverage build option (used for LCOV reports)
++# Usage: cmake -DFUZZING_COVERAGE=ON ...
++# -------------------------------------------------------
++option(FUZZING_COVERAGE "Enable gcov coverage instrumentation" OFF)
++if(FUZZING_COVERAGE)
++    message(STATUS "Coverage build enabled")
++    add_compile_options(-O0 -g --coverage -fprofile-arcs -ftest-coverage)
++    add_link_options(--coverage)
++    # Reset gcov counters on each run
++    add_compile_definitions(AFL_FUZZING)
++endif()
++
++option(AFL_FUZZING_BUILD "Enable AFL determinism patches" OFF)
++if(AFL_FUZZING_BUILD)
++    add_compile_definitions(AFL_FUZZING)
++endif()
++
+ set(CMAKE_C_STANDARD 11)
