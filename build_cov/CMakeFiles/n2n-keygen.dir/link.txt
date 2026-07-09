@@ -1,0 +1,1 @@
+/usr/bin/gcc  -Wall -Wshadow -Wpointer-arith -Wmissing-declarations -Wnested-externs -g --coverage CMakeFiles/n2n-keygen.dir/tools/n2n-keygen.c.o -o n2n-keygen  libn2n.a -lpthread 

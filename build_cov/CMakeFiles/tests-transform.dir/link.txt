@@ -1,0 +1,1 @@
+/usr/bin/gcc  -Wall -Wshadow -Wpointer-arith -Wmissing-declarations -Wnested-externs -g --coverage CMakeFiles/tests-transform.dir/tools/tests-transform.c.o -o tests-transform  libn2n.a -lpthread 

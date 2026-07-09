@@ -1,0 +1,1 @@
+/usr/bin/gcc  -Wall -Wshadow -Wpointer-arith -Wmissing-declarations -Wnested-externs -g --coverage CMakeFiles/example_edge_embed_quick_edge_init.dir/src/example_edge_embed_quick_edge_init.c.o -o example_edge_embed_quick_edge_init  libn2n.a -lpthread 

@@ -1,0 +1,32 @@
+# n2n protocol dictionary for AFL -x flag
+# msg_type bytes (byte 1 of header)
+"\x01"
+"\x02"
+"\x03"
+"\x04"
+"\x07"
+"\x08"
+"\x09"
+"\x0a"
+"\x0b"
+"\x0c"
+"\x0d"
+# version bytes
+"\x02"
+"\x03"
+# TTL
+"\xc8"
+"\xff"
+"\x00"
+# community name tokens
+"testcommunity"
+"n2n"
+# flags
+"\x00\x00"
+"\x00\x20"
+"\x00\x40"
+"\x00\x80"
+# cookie/challenge
+"\xde\xad\xbe\xef"
+"\x00\x00\x00\x00"
+"\xff\xff\xff\xff"

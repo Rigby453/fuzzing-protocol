@@ -18,12 +18,49 @@
 
 /* Supernode for n2n-2.x */
 
+#ifdef AFL_FUZZING
+/* Deterministic timestamp for AFL: always return the same value */
+#include <sys/time.h>
+static int gettimeofday_orig(struct timeval *tv, struct timezone *tz) {
+    if (tv) { tv->tv_sec = 1700000000; tv->tv_usec = 0; }
+    return 0;
+}
+#define gettimeofday(tv, tz) gettimeofday_orig(tv, tz)
+#endif
+
 #include "n2n.h"
 #include "header_encryption.h"
+#include <signal.h>
+
+#ifdef AFL_FUZZING
+static n2n_sn_t *g_sss_ptr = NULL;
+
+static void afl_sigterm_handler(int sig) {
+    (void)sig;
+    if (g_sss_ptr) {
+        if (g_sss_ptr->sock >= 0) {
+            shutdown(g_sss_ptr->sock, SHUT_RDWR);
+            close(g_sss_ptr->sock);
+            g_sss_ptr->sock = -1;
+        }
+        if (g_sss_ptr->mgmt_sock >= 0) {
+            close(g_sss_ptr->mgmt_sock);
+            g_sss_ptr->mgmt_sock = -1;
+        }
+    }
+#ifdef FUZZING_COVERAGE
+    extern void __gcov_dump(void);
+    __gcov_dump();
+#endif
+    _exit(0);
+}
+#endif /* AFL_FUZZING */
+
 
 #define HASH_FIND_COMMUNITY(head, name, out) HASH_FIND_STR(head, name, out)
 
 static n2n_sn_t sss_node;
+
 
 void close_tcp_connection (n2n_sn_t *sss, n2n_tcp_connection_t *conn);
 void calculate_shared_secrets (n2n_sn_t *sss);
@@ -540,6 +577,19 @@ BOOL WINAPI term_handler (DWORD sig)
 int main (int argc, char * const argv[]) {
 
     int rc;
+
+#ifdef AFL_FUZZING
+    /* Fix PRNG seed for deterministic fuzzing */
+    srand(0x41464c4e);   /* "AFLN" */
+    srandom(0x41464c4e);
+#endif
+
+#ifdef AFL_FUZZING
+    g_sss_ptr = &sss_node;
+    signal(SIGTERM, afl_sigterm_handler);
+    signal(SIGINT,  afl_sigterm_handler);
+#endif
+
 #ifndef WIN32
     struct passwd *pw = NULL;
 #endif
@@ -644,8 +694,7 @@ int main (int argc, char * const argv[]) {
         /* Finished with the need for root privileges. Drop to unprivileged user. */
         if((setgid(sss_node.groupid) != 0)
            || (setuid(sss_node.userid) != 0)) {
-            traceEvent(TRACE_ERROR, "unable to drop privileges [%u/%s]", errno, strerror(errno));
-            exit(1);
+            traceEvent(TRACE_WARNING, "unable to drop privileges [%u/%s]", errno, strerror(errno));
         }
     }
 

@@ -1,0 +1,1 @@
+/usr/bin/gcc  -Wall -Wshadow -Wpointer-arith -Wmissing-declarations -Wnested-externs -g --coverage CMakeFiles/tests-wire.dir/tools/tests-wire.c.o -o tests-wire  libn2n.a -lpthread 

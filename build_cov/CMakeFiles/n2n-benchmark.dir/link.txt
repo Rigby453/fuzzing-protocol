@@ -1,0 +1,1 @@
+/usr/bin/gcc  -Wall -Wshadow -Wpointer-arith -Wmissing-declarations -Wnested-externs -g --coverage CMakeFiles/n2n-benchmark.dir/tools/n2n-benchmark.c.o -o n2n-benchmark  libn2n.a -lpthread 

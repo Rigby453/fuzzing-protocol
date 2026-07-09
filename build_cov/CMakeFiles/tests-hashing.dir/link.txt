@@ -1,0 +1,1 @@
+/usr/bin/gcc  -Wall -Wshadow -Wpointer-arith -Wmissing-declarations -Wnested-externs -g --coverage CMakeFiles/tests-hashing.dir/tools/tests-hashing.c.o -o tests-hashing  libn2n.a -lpthread 

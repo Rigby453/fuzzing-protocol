@@ -1,0 +1,1 @@
+/usr/bin/afl-clang-fast -g -O0 -Wall -Wshadow -Wpointer-arith -Wmissing-declarations -Wnested-externs -g CMakeFiles/tests-compress.dir/tools/tests-compress.c.o -o tests-compress  libn2n.a -lpthread 

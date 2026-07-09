@@ -1,0 +1,1 @@
+/usr/bin/afl-clang-fast -g -O0 -Wall -Wshadow -Wpointer-arith -Wmissing-declarations -Wnested-externs -g CMakeFiles/example_sn_embed.dir/src/example_sn_embed.c.o -o example_sn_embed  libn2n.a -lpthread 

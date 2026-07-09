@@ -1,0 +1,1 @@
+/usr/bin/afl-clang-fast -g -O0 -Wall -Wshadow -Wpointer-arith -Wmissing-declarations -Wnested-externs -g CMakeFiles/supernode.dir/src/supernode.c.o -o supernode  libn2n.a -lpthread 

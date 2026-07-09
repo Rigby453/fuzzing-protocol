@@ -1,0 +1,1 @@
+/usr/bin/afl-clang-fast -g -O0 -Wall -Wshadow -Wpointer-arith -Wmissing-declarations -Wnested-externs -g CMakeFiles/tests-elliptic.dir/tools/tests-elliptic.c.o -o tests-elliptic  libn2n.a -lpthread 

@@ -1,5 +1,22 @@
 cmake_minimum_required(VERSION 3.5...3.31)
 project(n2n)
+
+# -------------------------------------------------------
+# Coverage build: cmake -DFUZZING_COVERAGE=ON
+# -------------------------------------------------------
+option(FUZZING_COVERAGE "Enable gcov coverage instrumentation" OFF)
+if(FUZZING_COVERAGE)
+    message(STATUS "Coverage build enabled")
+    add_compile_options(-O0 -g --coverage -fprofile-arcs -ftest-coverage)
+    add_link_options(--coverage)
+    add_compile_definitions(AFL_FUZZING)
+endif()
+
+option(AFL_FUZZING_BUILD "Enable AFL determinism patches" OFF)
+if(AFL_FUZZING_BUILD)
+    add_compile_definitions(AFL_FUZZING)
+endif()
+
 include(CheckFunctionExists)
 SET(CMAKE_VERBOSE_MAKEFILE ON)
 
